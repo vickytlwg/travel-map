@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Travel Tracker</title>
+    <style>
+        /* body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f9;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        } */
+
+        #mapContainer {
+            width: 100%;
+            height: 400px;
+            background: white;
+            padding: 20px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+
+        form {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+
+        input[type="text"] {
+            width: 75%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        button {
+            padding: 10px;
+            border: none;
+            background: #28a745;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button.delete {
+            background: #dc3545;
+        }
+
+        ul {
+            list-style: none;
+            padding: 0;
+            display: flex;
+        }
+
+        li {
+            padding: 10px;
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Travel Tracker</h1>
+    <div id="mapContainer"></div>
+    <form id="cityForm" action="/add-city" method="POST">
+        <label for="name">City Name:</label>
+        <input type="text" id="name" name="name" required>
+        <button type="submit">Add City</button>
+    </form>
+    <ul id="cityList"></ul>
+
+    <p id="errorMessage" style="color: red;"></p>
+    <script type="text/javascript">
+        window._AMapSecurityConfig = {
+            securityJsCode: "6f794942838bbd3d3a1ab96e39f2d351",
+        };
+    </script>
+    <script src="https://webapi.amap.com/maps?v=2.0&key=8d0bae0a31fc80742c8fa08638bd36ef"></script>
+    <script>
+        var map = new AMap.Map('mapContainer', {
+            center: [116.397428, 39.90923],
+            zoom: 4
+        });
+
+        var cityPolygons = [];
+
+        function loadCities() {
+            fetch('/cities')
+                .then(response => response.json())
+                .then(cities => {
+                    const citiesList = document.getElementById('cityList');
+                    citiesList.innerHTML = '';
+
+                    cities.forEach(city => {
+                        const li = document.createElement('li');
+                        li.textContent = city.name;
+
+                        const deleteButton = document.createElement('button');
+                        deleteButton.textContent = 'X';
+                        deleteButton.className = 'delete';
+                        deleteButton.onclick = function () {
+                            deleteCity(city.id, city.name);
+                        };
+
+                        li.appendChild(deleteButton);
+                        citiesList.appendChild(li);
+
+                        highlightCityOnMap(city.name); // 高亮城市
+                    });
+                });
+        }
+
+        function highlightCityOnMap(cityName) {
+            AMap.plugin('AMap.DistrictSearch', function () {
+                var districtSearch = new AMap.DistrictSearch({
+                    subdistrict: 0,
+                    extensions: 'all',
+                    level: 'city'
+                });
+
+                districtSearch.search(cityName, function (status, result) {
+                    if (status === 'complete' && result.districtList.length) {
+                        var district = result.districtList[0];
+                        var boundaries = district.boundaries;
+
+                        if (boundaries) {
+                            boundaries.forEach(function (boundary) {
+                                var polygon = new AMap.Polygon({
+                                    path: boundary,
+                                    fillColor: '#FFCCCC',
+                                    strokeColor: '#FF0000',
+                                    fillOpacity: 0.5,
+                                    strokeWeight: 1
+                                });
+                                polygon.setMap(map);
+                                cityPolygons.push(polygon);
+                            });
+                        } else {
+                            console.error('No boundaries found for city:', cityName);
+                        }
+                    } else {
+                        console.error('District search failed:', result);
+                    }
+                });
+            })
+        }
+
+
+        document.getElementById('cityForm').addEventListener('submit', function (event) {
+            event.preventDefault();
+            var cityName = document.getElementById('name').value.trim();
+            if (cityName === '') {
+                alert('Please enter a city name');
+                return;
+            }
+
+            fetch('/add-city', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ name: cityName })
+            }).then(response => {
+                if (response.status === 201) {
+                    return response.text();
+                } else if (response.status === 400) {
+                    throw new Error('City already exists');
+                } else {
+                    throw new Error('An error occurred');
+                }
+            })
+                .then(message => {
+                    // alert(message);
+                    loadCities();
+                })
+                .catch(error => {
+                    alert(error.message);
+                });
+        });
+        function deleteCity(cityId, cityName) {
+            fetch(`/delete-city/${cityId}`, {
+                method: 'DELETE'
+            })
+                .then(response => {
+                    if (response.status === 200) {
+                        // alert('City deleted successfully');
+                        removeCityHighlight(cityName); // 取消高亮城市
+                        loadCities();
+                    } else {
+                        throw new Error('Failed to delete city');
+                    }
+                })
+                .catch(error => {
+                    // alert(error.message);
+                });
+        }
+        function removeCityHighlight(cityName) {
+            AMap.plugin('AMap.DistrictSearch', function () {
+                const districtSearch = new AMap.DistrictSearch({
+                    subdistrict: 0,
+                    extensions: 'all',
+                    level: 'city'
+                });
+                districtSearch.search(cityName, function (status, result) {
+                    if (status === 'complete' && result.districtList.length) {
+                        const bounds = result.districtList[0].boundaries;
+                        if (bounds) {
+                            for (let i = 0; i < bounds.length; i++) {
+                                const polygon = new AMap.Polygon({
+                                    path: bounds[i],
+                                    fillColor: '#ffffff', // 恢复为默认颜色
+                                    fillOpacity: 0.5,
+                                    strokeWeight: 1,
+                                    strokeColor: '#ffffff'
+                                });
+                                map.add(polygon);
+                            }
+                        }
+                    }
+                });
+            })
+        }
+        loadCities();
+
+    </script>
+</body>
+
+</html>
